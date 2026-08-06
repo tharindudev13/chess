@@ -2,6 +2,7 @@ import os
 import shutil
 import platform
 import tarfile
+import concurrent.futures
 import io
 import json
 import math
@@ -498,13 +499,15 @@ def fetch_user_games():
         return jsonify({'error': f'Failed to fetch games: {str(e)}'}), 500
 
 
-def get_top_eval(sf_instance, fen):
+def get_top_eval(sf_instance, fen, depth=16):
     """
     Evaluates top 2 engine lines in a single Stockfish pass.
     Returns: (best_move_uci, mover_score_best, mover_score_second_best)
     Scores are relative to side to move (positive = advantage).
     """
     sf_instance.set_fen_position(fen)
+    if depth:
+        sf_instance.set_depth(depth)
     top = sf_instance.get_top_moves(2)
     if not top:
         return None, 0, None
@@ -585,7 +588,7 @@ def review_game():
     sf = create_stockfish(depth=16)
 
     # Initial position pre-eval
-    best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, board.fen())
+    best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, board.fen(), depth=12)
 
     for index, move in enumerate(moves_list):
         fen_before = board.fen()
@@ -644,7 +647,8 @@ def review_game():
             mover_score_after = 10000
             best_uci_curr, cp1_curr, cp2_curr = None, -10000, None
         else:
-            best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, fen_after)
+            eval_depth = 12 if index < 16 else 16
+            best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, fen_after, depth=eval_depth)
             # cp1_curr is opponent's advantage in fen_after. Mover's remaining score is -cp1_curr!
             mover_score_after = -cp1_curr if cp1_curr is not None else 0
 
@@ -840,30 +844,31 @@ def review_game():
             + "\n".join(prompt_items)
         )
 
-        models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        models_to_try = ['gemini-3.5-flash-lite'] #never change this line
+        def generate_llm_text(client, prompt, models):
+            for mod in models:
+                try:
+                    config = types.GenerateContentConfig(temperature=0.2) if 'types' in globals() else None
+                    if config:
+                        resp = client.models.generate_content(model=mod, contents=prompt, config=config)
+                    else:
+                        resp = client.models.generate_content(model=mod, contents=prompt)
+                    if resp and resp.text:
+                        return resp.text.strip()
+                except Exception as mod_err:
+                    print(f"Model {mod} notice: {str(mod_err)}")
+                    continue
+            return None
+
         raw_text = None
-
-        for mod in models_to_try:
-            try:
-                config = types.GenerateContentConfig(temperature=0.2) if 'types' in globals() else None
-                if config:
-                    response = user_ai_client.models.generate_content(
-                        model=mod,
-                        contents=batch_prompt,
-                        config=config
-                    )
-                else:
-                    response = user_ai_client.models.generate_content(
-                        model=mod,
-                        contents=batch_prompt
-                    )
-
-                if response and response.text:
-                    raw_text = response.text.strip()
-                    break
-            except Exception as mod_err:
-                print(f"Model {mod} notice: {str(mod_err)}")
-                continue
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(generate_llm_text, user_ai_client, batch_prompt, models_to_try)
+                raw_text = future.result(timeout=4.0)
+        except concurrent.futures.TimeoutError:
+            print("Gemini API request timed out (4s limit). Using engine explanations.")
+        except Exception as exec_err:
+            print(f"Gemini execution notice: {exec_err}")
 
         if raw_text:
             try:
