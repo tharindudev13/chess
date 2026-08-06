@@ -103,11 +103,20 @@ def get_stockfish_path():
 STOCKFISH_PATH = get_stockfish_path()
 
 def create_stockfish(depth=16):
-    """Creates a thread-safe Stockfish engine instance with optimized transposition table caching."""
+    """Creates a thread-safe Stockfish engine instance configured for Render's 512MB RAM environment."""
+    params = {
+        "Hash": 16,                 # Cap memory usage at 16MB RAM (prevents SIGKILL)
+        "Threads": 1,              # Restrict to 1 thread on Render's single virtual CPU core
+        "Minimum Thinking Time": 10
+    }
     try:
-        sf = Stockfish(path=STOCKFISH_PATH, parameters={"Threads": 2, "Hash": 32})
+        sf = Stockfish(path=STOCKFISH_PATH, parameters=params)
     except Exception:
         sf = Stockfish(path=STOCKFISH_PATH)
+        try:
+            sf.update_engine_parameters(params)
+        except Exception:
+            pass
     sf.set_depth(depth)
     return sf
 
