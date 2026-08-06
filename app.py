@@ -1,5 +1,7 @@
 import os
 import shutil
+import platform
+import tarfile
 import io
 import json
 import math
@@ -18,6 +20,41 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+def ensure_stockfish_linux(base_dir):
+    """Auto-downloads Stockfish binary on Linux/Render if missing."""
+    if platform.system() != "Linux":
+        return None
+
+    bin_dir = os.path.join(base_dir, "bin")
+    local_bin = os.path.join(bin_dir, "stockfish")
+    if os.path.exists(local_bin):
+        return local_bin
+
+    print("Stockfish not found on Linux/Render. Downloading binary automatically...")
+    os.makedirs(bin_dir, exist_ok=True)
+    tar_path = os.path.join(bin_dir, "stockfish.tar")
+    url = "https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar"
+    try:
+        urllib.request.urlretrieve(url, tar_path)
+        with tarfile.open(tar_path, "r:*") as tar:
+            for member in tar.getmembers():
+                if "stockfish-ubuntu" in member.name and not member.isdir():
+                    f = tar.extractfile(member)
+                    if f:
+                        with open(local_bin, "wb") as out:
+                            out.write(f.read())
+                        os.chmod(local_bin, 0o755)
+                        print(f"Stockfish binary downloaded successfully to {local_bin}")
+                        break
+        if os.path.exists(tar_path):
+            os.remove(tar_path)
+        if os.path.exists(local_bin):
+            return local_bin
+    except Exception as e:
+        print(f"Failed auto-downloading Stockfish binary on Render: {e}")
+
+    return None
+
 def get_stockfish_path():
     """Resolves Stockfish path dynamically across Windows local dev and Render/Linux environments."""
     # 1. Environment variable override
@@ -25,7 +62,7 @@ def get_stockfish_path():
     if env_path and os.path.exists(env_path):
         return env_path
 
-    # 2. Local bin directory (Render build script download)
+    # 2. Local bin directory (Render build script download or auto-download)
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     except Exception:
@@ -54,6 +91,11 @@ def get_stockfish_path():
     for win_path in win_paths:
         if os.path.exists(win_path):
             return win_path
+
+    # 6. Fallback auto-downloader on Linux
+    downloaded = ensure_stockfish_linux(base_dir)
+    if downloaded:
+        return downloaded
 
     return "stockfish"
 
