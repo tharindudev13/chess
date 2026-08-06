@@ -14,6 +14,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from stockfish import Stockfish
 from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -277,30 +278,36 @@ def get_suggestion():
                 return jsonify({'error': f'Illegal opponent move: "{opponent_move}"'}), 400
 
         sf = create_stockfish(depth=14)
-        sf.set_fen_position(board.fen())
-        best_move_uci = sf.get_best_move()
+        try:
+            sf.set_fen_position(board.fen())
+            best_move_uci = sf.get_best_move()
 
-        if not best_move_uci:
-            return jsonify({'error': 'No engine move available (Checkmate or Stalemate).'}), 400
+            if not best_move_uci:
+                return jsonify({'error': 'No engine move available (Checkmate or Stalemate).'}), 400
 
-        best_move_san = get_san_move(board, best_move_uci)
-        eval_raw = sf.get_evaluation()
-        eval_data = get_white_perspective_eval(board, eval_raw)
+            best_move_san = get_san_move(board, best_move_uci)
+            eval_raw = sf.get_evaluation()
+            eval_data = get_white_perspective_eval(board, eval_raw)
 
-        # Push the AI counter-move if opponent_move was provided so FEN advances for next turn
-        if opponent_move:
-            counter_move_obj = chess.Move.from_uci(best_move_uci)
-            board.push(counter_move_obj)
+            # Push the AI counter-move if opponent_move was provided so FEN advances for next turn
+            if opponent_move:
+                counter_move_obj = chess.Move.from_uci(best_move_uci)
+                board.push(counter_move_obj)
 
-        return jsonify({
-            'current_fen': board.fen(),
-            'player_color': player_color,
-            'uci_move': best_move_uci,
-            'san_move': best_move_san,
-            'from_square': best_move_uci[:2],
-            'to_square': best_move_uci[2:4],
-            'evaluation': eval_data
-        })
+            return jsonify({
+                'current_fen': board.fen(),
+                'player_color': player_color,
+                'uci_move': best_move_uci,
+                'san_move': best_move_san,
+                'from_square': best_move_uci[:2],
+                'to_square': best_move_uci[2:4],
+                'evaluation': eval_data
+            })
+        finally:
+            try:
+                sf.send_quit_command()
+            except Exception:
+                pass
     except Exception as e:
         return jsonify({'error': f'Invalid board or move input: {str(e)}'}), 400
 
@@ -316,18 +323,24 @@ def get_engine_move():
     try:
         board = chess.Board(fen)
         sf = create_stockfish(depth=14)
-        sf.set_fen_position(board.fen())
-        best_move_uci = sf.get_best_move()
+        try:
+            sf.set_fen_position(board.fen())
+            best_move_uci = sf.get_best_move()
 
-        if not best_move_uci:
-            return jsonify({'error': 'Game over. No legal moves left.'}), 400
+            if not best_move_uci:
+                return jsonify({'error': 'Game over. No legal moves left.'}), 400
 
-        best_move_san = get_san_move(board, best_move_uci)
+            best_move_san = get_san_move(board, best_move_uci)
 
-        return jsonify({
-            'move': best_move_uci,
-            'san': best_move_san
-        })
+            return jsonify({
+                'move': best_move_uci,
+                'san': best_move_san
+            })
+        finally:
+            try:
+                sf.send_quit_command()
+            except Exception:
+                pass
     except Exception as e:
         return jsonify({'error': f'Failed to process engine move: {str(e)}'}), 400
 
@@ -618,204 +631,210 @@ def review_game():
 
     sf = create_stockfish(depth=16)
 
-    # Initial position pre-eval for chunk
-    best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, board.fen(), depth=12)
+    try:
+        # Initial position pre-eval for chunk
+        best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, board.fen(), depth=12)
 
-    for index, move in enumerate(chunk_moves, start=start_idx):
-        fen_before = board.fen()
-        legal_moves_count = board.legal_moves.count()
-        is_forced = (legal_moves_count == 1)
+        for index, move in enumerate(chunk_moves, start=start_idx):
+            fen_before = board.fen()
+            legal_moves_count = board.legal_moves.count()
+            is_forced = (legal_moves_count == 1)
 
-        moved_by_white = (board.turn == chess.WHITE)
-        mover_color_str = "white" if moved_by_white else "black"
-        is_user_move = (mover_color_str == target_color)
+            moved_by_white = (board.turn == chess.WHITE)
+            mover_color_str = "white" if moved_by_white else "black"
+            is_user_move = (mover_color_str == target_color)
 
-        mover_score_before = cp1_curr if cp1_curr is not None else 0
-        exp_pts_before = cp_to_expected_points(mover_score_before)
+            mover_score_before = cp1_curr if cp1_curr is not None else 0
+            exp_pts_before = cp_to_expected_points(mover_score_before)
 
-        second_best_exp_pts = cp_to_expected_points(cp2_curr) if cp2_curr is not None else None
+            second_best_exp_pts = cp_to_expected_points(cp2_curr) if cp2_curr is not None else None
 
-        sandbox = chess.Board(fen_before)
-        best_move_san = sandbox.san(chess.Move.from_uci(best_uci_curr)) if best_uci_curr else "N/A"
-        move_san = board.san(move)
-        to_sq_name = chess.square_name(move.to_square)
+            sandbox = chess.Board(fen_before)
+            best_move_san = sandbox.san(chess.Move.from_uci(best_uci_curr)) if best_uci_curr else "N/A"
+            move_san = board.san(move)
+            to_sq_name = chess.square_name(move.to_square)
 
-        # Extract exact piece moved and piece captured for 100% LLM positional accuracy
-        piece_moved_obj = sandbox.piece_at(move.from_square)
-        piece_captured_obj = sandbox.piece_at(move.to_square)
+            # Extract exact piece moved and piece captured for 100% LLM positional accuracy
+            piece_moved_obj = sandbox.piece_at(move.from_square)
+            piece_captured_obj = sandbox.piece_at(move.to_square)
 
-        piece_names = {
-            chess.PAWN: "Pawn",
-            chess.KNIGHT: "Knight",
-            chess.BISHOP: "Bishop",
-            chess.ROOK: "Rook",
-            chess.QUEEN: "QUEEN",
-            chess.KING: "King"
-        }
-        moved_piece_name = piece_names.get(piece_moved_obj.piece_type, "Piece") if piece_moved_obj else "Piece"
+            piece_names = {
+                chess.PAWN: "Pawn",
+                chess.KNIGHT: "Knight",
+                chess.BISHOP: "Bishop",
+                chess.ROOK: "Rook",
+                chess.QUEEN: "QUEEN",
+                chess.KING: "King"
+            }
+            moved_piece_name = piece_names.get(piece_moved_obj.piece_type, "Piece") if piece_moved_obj else "Piece"
 
-        if not piece_captured_obj and piece_moved_obj and piece_moved_obj.piece_type == chess.PAWN and move.to_square != move.from_square and sandbox.is_en_passant(move):
-            captured_piece_name = "Pawn (En Passant)"
-        elif piece_captured_obj:
-            captured_piece_name = piece_names.get(piece_captured_obj.piece_type, "Piece")
-        else:
-            captured_piece_name = "None"
-
-        # Check for piece sacrifice
-        is_sacrifice = is_piece_sacrificed(sandbox, move)
-
-        # Execute move on board
-        board.push(move)
-        fen_after = board.fen()
-
-        # Check / Checkmate status
-        is_check = board.is_check()
-        is_checkmate = board.is_checkmate()
-        check_str = "Checkmate!" if is_checkmate else ("Check!" if is_check else "")
-
-        # Compute next position eval & mover_score_after
-        if is_checkmate:
-            mover_score_after = 10000
-            best_uci_curr, cp1_curr, cp2_curr = None, -10000, None
-        else:
-            eval_depth = 12 if index < 16 else 16
-            best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, fen_after, depth=eval_depth)
-            # cp1_curr is opponent's advantage in fen_after. Mover's remaining score is -cp1_curr!
-            mover_score_after = -cp1_curr if cp1_curr is not None else 0
-
-        exp_pts_after = cp_to_expected_points(mover_score_after)
-
-        # Expected points loss (0.00 to 1.00) & Centipawn Loss (0 to 10000)
-        exp_pts_loss = max(0.0, exp_pts_before - exp_pts_after)
-        cpl_loss = max(0, mover_score_before - mover_score_after)
-
-        if moved_by_white:
-            white_losses.append(exp_pts_loss)
-        else:
-            black_losses.append(exp_pts_loss)
-
-        full_move_num = (index // 2) + 1
-        move_label = f"{full_move_num}. {move_san}" if moved_by_white else move_san
-
-        # Detect if opponent made a blunder on their previous move (for Miss detection)
-        prev_opponent_blundered = False
-        if len(reviews) > 0:
-            prev_opponent_blundered = (reviews[-1]['quality'] == "Blunder")
-
-        # Detect if position after allows forced mate or immediate mate in 1 for opponent
-        allows_immediate_mate = (mover_score_after <= -9500) # Opponent has Mate in 1
-        allows_forced_mate = (mover_score_after <= -9000 and mover_score_before > -9000) # Allowed forced mate
-
-        # ----------------------------------------------------
-        # 🎯 OFFICIAL CHESS.COM CLASSIFICATION V2 LOGIC
-        # ----------------------------------------------------
-        move_quality = "Good Move"
-        explanation = "Solid move maintaining a stable position."
-
-        is_top_move = (move_san == best_move_san)
-
-        # A) FORCED MOVES (Only 1 legal option)
-        if is_forced:
-            move_quality = "Forced"
-            explanation = "Forced move! The only legal option available."
-
-        # B) BOOK MOVES (Opening theory catalog in early moves)
-        elif full_move_num <= 10 and move_san in COMMON_OPENING_MOVES:
-            move_quality = "Book"
-            explanation = "Standard opening theory."
-
-        # C) DELIVERING CHECKMATE
-        elif board.is_checkmate():
-            move_quality = "Best Move"
-            explanation = "Checkmate! Delivered a game-ending checkmate."
-
-        # D) BLUNDERS (Expected Points Loss >= 0.20 OR Centipawn Loss >= 200 OR allowing checkmate)
-        elif allows_immediate_mate or allows_forced_mate or exp_pts_loss >= 0.20 or cpl_loss >= 200:
-            move_quality = "Blunder"
-            if allows_immediate_mate:
-                explanation = "Blunder! Leaves an immediate checkmate in 1 move."
-            elif allows_forced_mate:
-                explanation = "Blunder! Allows a forced checkmate sequence."
-            elif is_user_move:
-                explanation = "Blunder! Surrenders significant winning chances."
+            if not piece_captured_obj and piece_moved_obj and piece_moved_obj.piece_type == chess.PAWN and move.to_square != move.from_square and sandbox.is_en_passant(move):
+                captured_piece_name = "Pawn (En Passant)"
+            elif piece_captured_obj:
+                captured_piece_name = piece_names.get(piece_captured_obj.piece_type, "Piece")
             else:
-                explanation = "Blunder! Your opponent surrenders significant winning chances."
+                captured_piece_name = "None"
 
-        # E) MISTAKES (Expected Points Loss >= 0.10 OR Centipawn Loss >= 100)
-        elif exp_pts_loss >= 0.10 or cpl_loss >= 100:
-            move_quality = "Mistake"
-            explanation = "Mistake! Gives up active control of the position."
+            # Check for piece sacrifice
+            is_sacrifice = is_piece_sacrificed(sandbox, move)
 
-        # F) INACCURACIES (Expected Points Loss >= 0.05 OR Centipawn Loss >= 50)
-        elif exp_pts_loss >= 0.05 or cpl_loss >= 50:
-            move_quality = "Inaccuracy"
-            explanation = "Inaccurate move. Slightly compromises piece activity."
+            # Execute move on board
+            board.push(move)
+            fen_after = board.fen()
 
-        # G) MISS (Failed to capitalize on opponent blunder)
-        elif prev_opponent_blundered and exp_pts_before >= 0.55 and (exp_pts_loss >= 0.05 or cpl_loss >= 50):
-            move_quality = "Miss"
-            explanation = "Missed opportunity! Failed to capitalize on opponent's mistake."
+            # Check / Checkmate status
+            is_check = board.is_check()
+            is_checkmate = board.is_checkmate()
+            check_str = "Checkmate!" if is_checkmate else ("Check!" if is_check else "")
 
-        # H) TOP ENGINE MOVES: Brilliant / Great / Best (MUST be actual top move)
-        elif is_top_move:
-            # 1. Brilliant (!!): Sound piece sacrifice that leads to significantly better position
-            if is_sacrifice and exp_pts_after >= exp_pts_before + 0.15 and exp_pts_before < 0.90:
-                move_quality = "Brilliant"
-                explanation = "Brilliant piece sacrifice! Unlocks a winning tactical attack."
-
-            # 2. Great Move (!): The played move is UNIQUELY far superior to the 2nd-best option.
-            elif (
-                second_best_exp_pts is not None
-                and (exp_pts_after - second_best_exp_pts) >= 0.15
-                and legal_moves_count >= 3  # Not a trivially forced position
-            ):
-                move_quality = "Great Move"
-                explanation = "Great move! The only strong reply in a critical position."
-
-            # 3. Best Move (★): Top engine move with no special conditions
+            # Compute next position eval & mover_score_after
+            if is_checkmate:
+                mover_score_after = 10000
+                best_uci_curr, cp1_curr, cp2_curr = None, -10000, None
             else:
-                move_quality = "Best Move"
-                explanation = "Spot-on move! Takes strong control of the position."
+                eval_depth = 12 if index < 16 else 16
+                best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, fen_after, depth=eval_depth)
+                # cp1_curr is opponent's advantage in fen_after. Mover's remaining score is -cp1_curr!
+                mover_score_after = -cp1_curr if cp1_curr is not None else 0
 
-        # I) EXCELLENT MOVES (Near-optimal continuation, expected points loss <= 0.02 or CPL <= 20)
-        elif exp_pts_loss <= 0.02 or cpl_loss <= 20:
-            move_quality = "Excellent"
-            explanation = "Excellent continuation maintaining solid piece activity."
+            exp_pts_after = cp_to_expected_points(mover_score_after)
 
-        # J) GOOD MOVES (Solid continuation)
-        else:
+            # Expected points loss (0.00 to 1.00) & Centipawn Loss (0 to 10000)
+            exp_pts_loss = max(0.0, exp_pts_before - exp_pts_after)
+            cpl_loss = max(0, mover_score_before - mover_score_after)
+
+            if moved_by_white:
+                white_losses.append(exp_pts_loss)
+            else:
+                black_losses.append(exp_pts_loss)
+
+            full_move_num = (index // 2) + 1
+            move_label = f"{full_move_num}. {move_san}" if moved_by_white else move_san
+
+            # Detect if opponent made a blunder on their previous move (for Miss detection)
+            prev_opponent_blundered = False
+            if len(reviews) > 0:
+                prev_opponent_blundered = (reviews[-1]['quality'] == "Blunder")
+
+            # Detect if position after allows forced mate or immediate mate in 1 for opponent
+            allows_immediate_mate = (mover_score_after <= -9500) # Opponent has Mate in 1
+            allows_forced_mate = (mover_score_after <= -9000 and mover_score_before > -9000) # Allowed forced mate
+
+            # ----------------------------------------------------
+            # 🎯 OFFICIAL CHESS.COM CLASSIFICATION V2 LOGIC
+            # ----------------------------------------------------
             move_quality = "Good Move"
             explanation = "Solid move maintaining a stable position."
 
-        if moved_by_white:
-            white_counts[move_quality] = white_counts.get(move_quality, 0) + 1
-        else:
-            black_counts[move_quality] = black_counts.get(move_quality, 0) + 1
+            is_top_move = (move_san == best_move_san)
 
-        batch_llm_queue.append({
-            'id': index - start_idx,
-            'label': move_label,
-            'mover': mover_color_str.upper(),
-            'is_user': is_user_move,
-            'piece_moved': moved_piece_name,
-            'piece_captured': captured_piece_name,
-            'status': check_str,
-            'fen_before': fen_before,
-            'fen_after': fen_after,
-            'quality': move_quality,
-            'played': move_san,
-            'best': best_move_san,
-            'stockfish_fact': explanation
-        })
+            # A) FORCED MOVES (Only 1 legal option)
+            if is_forced:
+                move_quality = "Forced"
+                explanation = "Forced move! The only legal option available."
 
-        reviews.append({
-            'num': move_label,
-            'quality': move_quality,
-            'explanation': explanation,
-            'fen': fen_after,
-            'to_square': to_sq_name,
-            'cpl_loss': round(exp_pts_loss * 100, 1)  # Expected Points Loss %
-        })
+            # B) BOOK MOVES (Opening theory catalog in early moves)
+            elif full_move_num <= 10 and move_san in COMMON_OPENING_MOVES:
+                move_quality = "Book"
+                explanation = "Standard opening theory."
+
+            # C) DELIVERING CHECKMATE
+            elif board.is_checkmate():
+                move_quality = "Best Move"
+                explanation = "Checkmate! Delivered a game-ending checkmate."
+
+            # D) BLUNDERS (Expected Points Loss >= 0.20 OR Centipawn Loss >= 200 OR allowing checkmate)
+            elif allows_immediate_mate or allows_forced_mate or exp_pts_loss >= 0.20 or cpl_loss >= 200:
+                move_quality = "Blunder"
+                if allows_immediate_mate:
+                    explanation = "Blunder! Leaves an immediate checkmate in 1 move."
+                elif allows_forced_mate:
+                    explanation = "Blunder! Allows a forced checkmate sequence."
+                elif is_user_move:
+                    explanation = "Blunder! Surrenders significant winning chances."
+                else:
+                    explanation = "Blunder! Your opponent surrenders significant winning chances."
+
+            # E) MISTAKES (Expected Points Loss >= 0.10 OR Centipawn Loss >= 100)
+            elif exp_pts_loss >= 0.10 or cpl_loss >= 100:
+                move_quality = "Mistake"
+                explanation = "Mistake! Gives up active control of the position."
+
+            # F) INACCURACIES (Expected Points Loss >= 0.05 OR Centipawn Loss >= 50)
+            elif exp_pts_loss >= 0.05 or cpl_loss >= 50:
+                move_quality = "Inaccuracy"
+                explanation = "Inaccurate move. Slightly compromises piece activity."
+
+            # G) MISS (Failed to capitalize on opponent blunder)
+            elif prev_opponent_blundered and exp_pts_before >= 0.55 and (exp_pts_loss >= 0.05 or cpl_loss >= 50):
+                move_quality = "Miss"
+                explanation = "Missed opportunity! Failed to capitalize on opponent's mistake."
+
+            # H) TOP ENGINE MOVES: Brilliant / Great / Best (MUST be actual top move)
+            elif is_top_move:
+                # 1. Brilliant (!!): Sound piece sacrifice that leads to significantly better position
+                if is_sacrifice and exp_pts_after >= exp_pts_before + 0.15 and exp_pts_before < 0.90:
+                    move_quality = "Brilliant"
+                    explanation = "Brilliant piece sacrifice! Unlocks a winning tactical attack."
+
+                # 2. Great Move (!): The played move is UNIQUELY far superior to the 2nd-best option.
+                elif (
+                    second_best_exp_pts is not None
+                    and (exp_pts_after - second_best_exp_pts) >= 0.15
+                    and legal_moves_count >= 3  # Not a trivially forced position
+                ):
+                    move_quality = "Great Move"
+                    explanation = "Great move! The only strong reply in a critical position."
+
+                # 3. Best Move (★): Top engine move with no special conditions
+                else:
+                    move_quality = "Best Move"
+                    explanation = "Spot-on move! Takes strong control of the position."
+
+            # I) EXCELLENT MOVES (Near-optimal continuation, expected points loss <= 0.02 or CPL <= 20)
+            elif exp_pts_loss <= 0.02 or cpl_loss <= 20:
+                move_quality = "Excellent"
+                explanation = "Excellent continuation maintaining solid piece activity."
+
+            # J) GOOD MOVES (Solid continuation)
+            else:
+                move_quality = "Good Move"
+                explanation = "Solid move maintaining a stable position."
+
+            if moved_by_white:
+                white_counts[move_quality] = white_counts.get(move_quality, 0) + 1
+            else:
+                black_counts[move_quality] = black_counts.get(move_quality, 0) + 1
+
+            batch_llm_queue.append({
+                'id': index - start_idx,
+                'label': move_label,
+                'mover': mover_color_str.upper(),
+                'is_user': is_user_move,
+                'piece_moved': moved_piece_name,
+                'piece_captured': captured_piece_name,
+                'status': check_str,
+                'fen_before': fen_before,
+                'fen_after': fen_after,
+                'quality': move_quality,
+                'played': move_san,
+                'best': best_move_san,
+                'stockfish_fact': explanation
+            })
+
+            reviews.append({
+                'num': move_label,
+                'quality': move_quality,
+                'explanation': explanation,
+                'fen': fen_after,
+                'to_square': to_sq_name,
+                'cpl_loss': round(exp_pts_loss * 100, 1)  # Expected Points Loss %
+            })
+    finally:
+        try:
+            sf.send_quit_command()
+        except Exception:
+            pass
 
     # Summary Statistics Calculation (Official Chess.com CAPS V2 Accuracy Formula)
     def calc_caps_move_acc(exp_loss):
@@ -868,22 +887,19 @@ def review_game():
             f"   - DO NOT repeat algebraic move notation (like 'Bxd4', 'Rad1', 'cxd5', 'Nf3') in the comment.\n"
             f"   - Explain the strategic or tactical purpose in natural human chess terms (e.g. 'protects your king', 'pins the knight', 'missed a free pawn', 'takes the open file').\n"
             f"3. ACCURACY & CONCISENESS:\n"
-            f"   - Ground your remark in the move Quality ({item['quality']}) and Captured Piece ({item['piece_captured']}).\n"
+            f"   - Ground your remark in the move Quality and Captured Piece.\n"
             f"   - Each comment MUST be 8 to 12 words maximum, warm, punchy, and beginner-friendly.\n"
             f"4. OUTPUT FORMAT: Output ONLY a valid JSON object mapping Move ID strings ('0', '1', '2', etc.) to the 8-12 word coach comment string.\n\n"
             f"MOVES TO REVIEW:\n"
             + "\n".join(prompt_items)
         )
 
-        models_to_try = ['gemini-3.5-flash-lite'] #never change this line
+        models_to_try = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         def generate_llm_text(client, prompt, models):
             for mod in models:
                 try:
-                    config = types.GenerateContentConfig(temperature=0.2) if 'types' in globals() else None
-                    if config:
-                        resp = client.models.generate_content(model=mod, contents=prompt, config=config)
-                    else:
-                        resp = client.models.generate_content(model=mod, contents=prompt)
+                    config = types.GenerateContentConfig(temperature=0.2)
+                    resp = client.models.generate_content(model=mod, contents=prompt, config=config)
                     if resp and resp.text:
                         return resp.text.strip()
                 except Exception as mod_err:
@@ -895,9 +911,9 @@ def review_game():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(generate_llm_text, user_ai_client, batch_prompt, models_to_try)
-                raw_text = future.result(timeout=4.0)
+                raw_text = future.result(timeout=12.0)
         except concurrent.futures.TimeoutError:
-            print("Gemini API request timed out (4s limit). Using engine explanations.")
+            print("Gemini API request timed out (12s limit). Using engine explanations.")
         except Exception as exec_err:
             print(f"Gemini execution notice: {exec_err}")
 

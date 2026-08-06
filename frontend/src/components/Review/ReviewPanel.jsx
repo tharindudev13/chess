@@ -125,13 +125,22 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
 
     try {
       while (hasMore) {
-        const data = await reviewGame(
-          pgnToReview.trim(),
-          playerColorPreference,
-          chesscomUser,
-          offset,
-          CHUNK_SIZE
-        );
+        let data = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            data = await reviewGame(
+              pgnToReview.trim(),
+              playerColorPreference,
+              chesscomUser,
+              offset,
+              CHUNK_SIZE
+            );
+            break;
+          } catch (chunkErr) {
+            if (attempt === 2) throw chunkErr;
+            await new Promise((resolve) => setTimeout(resolve, 800));
+          }
+        }
 
         const newChunk = data.reviews || [];
         accumulatedReviews = [...accumulatedReviews, ...newChunk];
@@ -441,6 +450,19 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
                   </motion.div>
                 )}
 
+                {!localStorage.getItem('gemini_api_key') && (
+                  <button
+                    onClick={() => setShowKeyModal(true)}
+                    className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/15 transition-all text-xs font-heading font-medium"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Key size={13} className="text-accent-cyan" />
+                      Configure Gemini API key for better explanations
+                    </span>
+                    <span className="text-[11px] font-semibold underline opacity-80">Setup →</span>
+                  </button>
+                )}
+
                 <motion.button
                   onClick={handleReviewClick}
                   disabled={!pgn.trim()}
@@ -506,6 +528,19 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
                       />
                     </div>
                   </div>
+                )}
+
+                {!localStorage.getItem('gemini_api_key') && !isLoading && (
+                  <button
+                    onClick={() => setShowKeyModal(true)}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/15 transition-all text-xs font-heading font-medium"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Key size={13} className="text-accent-cyan" />
+                      Configure Gemini API key for better explanations
+                    </span>
+                    <span className="text-[11px] font-semibold underline opacity-80">Setup →</span>
+                  </button>
                 )}
                 {/* ── Mode Switcher & TTS Voice Button ── */}
                 <div className="flex items-center justify-between pb-2 border-b border-white/10">
