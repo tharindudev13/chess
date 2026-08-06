@@ -532,15 +532,14 @@ def get_top_eval(sf_instance, fen):
 # =====================================================================
 @app.route('/review_game', methods=['POST'])
 def review_game():
-    # Extract Gemini API key from incoming request header
-    user_api_key = request.headers.get('X-Gemini-API-Key')
-    if not user_api_key:
-        return jsonify({'error': 'Gemini API key is required. Please set up your API key.'}), 401
-
-    try:
-        user_ai_client = genai.Client(api_key=user_api_key)
-    except Exception as e:
-        return jsonify({'error': f'Invalid Gemini API key: {str(e)}'}), 401
+    # Extract Gemini API key from incoming request header or environment variable
+    user_api_key = request.headers.get('X-Gemini-API-Key') or os.environ.get('GEMINI_API_KEY')
+    user_ai_client = None
+    if user_api_key and user_api_key.strip():
+        try:
+            user_ai_client = genai.Client(api_key=user_api_key.strip())
+        except Exception as e:
+            print(f"Notice: Gemini client init warning: {e}")
 
     data = request.json or {}
     pgn_text = data.get('pgn', '').strip()
@@ -808,7 +807,7 @@ def review_game():
     # =====================================================================
     # ⚡ 1 BATCH GEMINI CALL FOR THE WHOLE GAME
     # =====================================================================
-    if batch_llm_queue:
+    if user_ai_client and batch_llm_queue:
         prompt_items = []
         opp_color_str = "BLACK" if target_color == "white" else "WHITE"
 

@@ -123,13 +123,6 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
 
   // Execute Game Review
   const executeReview = useCallback(async (pgnToReview, playerColorPreference = null) => {
-    const apiKey = localStorage.getItem('gemini_api_key');
-    if (!apiKey) {
-      setPendingPgn(pgnToReview);
-      setShowKeyModal(true);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     setReviews(null);
