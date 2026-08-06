@@ -147,21 +147,25 @@ body {
 
 /* ── Move Quality Colors ── */
 .quality-brilliant { color: #06b6d4; }
+.quality-great { color: #3b82f6; }
 .quality-best { color: #22c55e; }
-.quality-great { color: #06b6d4; }
+.quality-excellent { color: #10b981; }
 .quality-good { color: #84cc16; }
 .quality-inaccuracy { color: #eab308; }
 .quality-mistake { color: #f97316; }
+.quality-miss { color: #f43f5e; }
 .quality-blunder { color: #ef4444; }
 .quality-forced { color: #64748b; }
 .quality-book { color: #d5a47e; }
 
 .quality-bg-brilliant { background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.3); }
+.quality-bg-great { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.3); }
 .quality-bg-best { background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); }
-.quality-bg-great { background: rgba(6, 182, 212, 0.15); border-color: rgba(6, 182, 212, 0.3); }
+.quality-bg-excellent { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); }
 .quality-bg-good { background: rgba(132, 204, 22, 0.15); border-color: rgba(132, 204, 22, 0.3); }
 .quality-bg-inaccuracy { background: rgba(234, 179, 8, 0.15); border-color: rgba(234, 179, 8, 0.3); }
 .quality-bg-mistake { background: rgba(249, 115, 22, 0.15); border-color: rgba(249, 115, 22, 0.3); }
+.quality-bg-miss { background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.3); }
 .quality-bg-blunder { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); }
 .quality-bg-forced { background: rgba(100, 116, 139, 0.15); border-color: rgba(100, 116, 139, 0.3); }
 .quality-bg-book { background: rgba(213, 164, 126, 0.15); border-color: rgba(213, 164, 126, 0.3); }

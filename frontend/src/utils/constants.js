@@ -1,33 +1,37 @@
 // ── API ──
-export const API_BASE = 'http://127.0.0.1:5000';
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
 
 // ── Move Quality → Color Map ──
 // Maps every quality label the backend can return to a specific hex color
 export const QUALITY_COLORS = {
   'Brilliant':       '#06b6d4',
+  'Great Move':      '#3b82f6',
   'Best Move':       '#22c55e',
-  'Great Move':      '#06b6d4',
+  'Excellent':       '#10b981',
   'Good Move':       '#84cc16',
-  'Inaccuracy':      '#eab308',
-  'Mistake':         '#f97316',
-  'Blunder':         '#ef4444',
   'Forced':          '#64748b',
   'Book':            '#d5a47e',
   'Book/Standard':   '#d5a47e',
+  'Inaccuracy':      '#eab308',
+  'Mistake':         '#f97316',
+  'Miss':            '#f43f5e',
+  'Blunder':         '#ef4444',
 };
 
 // ── Quality → CSS class suffix ──
 export const QUALITY_CLASS = {
   'Brilliant':       'brilliant',
-  'Best Move':       'best',
   'Great Move':      'great',
+  'Best Move':       'best',
+  'Excellent':       'excellent',
   'Good Move':       'good',
-  'Inaccuracy':      'inaccuracy',
-  'Mistake':         'mistake',
-  'Blunder':         'blunder',
   'Forced':          'forced',
   'Book':            'book',
   'Book/Standard':   'book',
+  'Inaccuracy':      'inaccuracy',
+  'Mistake':         'mistake',
+  'Miss':            'miss',
+  'Blunder':         'blunder',
 };
 
 // ── Time Control Presets ──

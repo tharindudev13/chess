@@ -23,8 +23,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('arena');
   const [evaluation, setEvaluation] = useState(null);
   const [hintSquares, setHintSquares] = useState(null);
+  const [moveBadge, setMoveBadge] = useState(null);
+  const [boardOrientation, setBoardOrientation] = useState('white');
+  const [reviewPlayers, setReviewPlayers] = useState({ white: null, black: null });
   const [timeoutColor, setTimeoutColor] = useState(null);
   const [gameOverReason, setGameOverReason] = useState(null);
+  const [linkedUsername, setLinkedUsername] = useState(localStorage.getItem('chesscom_username') || '');
   const { addToast, ToastContainer } = useToast();
 
   const {
@@ -40,9 +44,20 @@ export default function App() {
     reset,
   } = useChessGame();
 
-  // Clear board highlights when switching tabs
+  // Restrict "Next Move" tab strictly to username "tharindudev"
+  const showNextMove = linkedUsername.trim().toLowerCase() === 'tharindudev';
+
+  // Automatically fall back to arena if user loses authorization for terminal
+  useEffect(() => {
+    if (activeTab === 'terminal' && !showNextMove) {
+      setActiveTab('arena');
+    }
+  }, [activeTab, showNextMove]);
+
+  // Clear board highlights & badges when switching tabs
   const handleTabChange = useCallback((tab) => {
     setHintSquares(null);
+    setMoveBadge(null);
     setActiveTab(tab);
   }, []);
 
@@ -56,9 +71,7 @@ export default function App() {
             setEvaluation(data.evaluation);
           }
         })
-        .catch(() => {
-          // Silent catch for end of game or busy backend
-        });
+        .catch(() => {});
     }, 150);
 
     return () => {
@@ -67,44 +80,54 @@ export default function App() {
     };
   }, [fen]);
 
-  // Handle piece drop / click move
-  const handlePieceDrop = useCallback((from, to) => {
-    // Clear hints when making a move
-    setHintSquares(null);
+  // Handle piece drop on board
+  const handlePieceDrop = useCallback(
+    (sourceSquare, targetSquare) => {
+      const move = makeMove(sourceSquare, targetSquare);
+      if (move) {
+        setHintSquares(null);
+        setMoveBadge(null);
+        return true;
+      }
+      return false;
+    },
+    [makeMove]
+  );
 
-    const result = makeMove(from, to);
-    if (!result) {
-      addToast('Illegal move', 'warning');
-    }
-    return result;
-  }, [makeMove, addToast]);
+  // Handle move execution from Match Arena
+  const handleEngineMove = useCallback(
+    (moveUci) => {
+      const move = makeMoveUci(moveUci);
+      if (move) {
+        setHintSquares(null);
+        setMoveBadge(null);
+      }
+    },
+    [makeMoveUci]
+  );
 
-  // Handle engine move (for bot play)
-  const handleEngineMove = useCallback((from, to) => {
-    return makeMove(from, to);
-  }, [makeMove]);
-
-  // Handle timeout
-  const handleTimeout = useCallback((color) => {
-    setTimeoutColor(color);
-    setGameOverReason('timeout');
-  }, []);
-
-  // Handle reset
+  // Handle reset game
   const handleReset = useCallback(() => {
     reset();
     setEvaluation(null);
     setHintSquares(null);
+    setMoveBadge(null);
     setTimeoutColor(null);
     setGameOverReason(null);
   }, [reset]);
 
-  // Handle hint squares from terminal
+  // Handle clock timeout
+  const handleTimeout = useCallback((loserColor) => {
+    setTimeoutColor(loserColor);
+    setGameOverReason('timeout');
+  }, []);
+
+  // Handle hint squares from Next Move Terminal
   const handleHintSquares = useCallback((squares) => {
     setHintSquares(squares);
   }, []);
 
-  // Handle FEN load from review
+  // Handle loading specific FEN (from review timeline or terminal)
   const handleLoadFen = useCallback((newFen) => {
     loadFen(newFen);
   }, [loadFen]);
@@ -129,14 +152,16 @@ export default function App() {
 
             {/* Board + Eval Bar */}
             <div className="flex gap-3 items-stretch">
-              <EvalBar evaluation={evaluation} />
+              <EvalBar evaluation={evaluation} boardOrientation={boardOrientation} />
               <div className="flex-1">
                 <ChessBoardView
                   fen={fen}
                   onPieceDrop={handlePieceDrop}
+                  boardOrientation={boardOrientation}
                   getLegalMoves={getLegalMoves}
                   hintSquares={hintSquares}
                   lastMove={lastMove}
+                  moveBadge={activeTab === 'review' ? moveBadge : null}
                   allowMoves={!isOver}
                   turn={currentTurn}
                 />
@@ -146,14 +171,22 @@ export default function App() {
             {/* Player Badges */}
             <div className="flex flex-col gap-1.5">
               <PlayerBadge
-                color="b"
-                name="Black"
-                isActive={currentTurn === 'b' && !isOver}
+                color={boardOrientation === 'black' ? 'w' : 'b'}
+                name={
+                  (boardOrientation === 'black'
+                    ? (activeTab === 'review' && reviewPlayers.white) || 'White'
+                    : (activeTab === 'review' && reviewPlayers.black) || 'Black')
+                }
+                isActive={currentTurn === (boardOrientation === 'black' ? 'w' : 'b') && !isOver}
               />
               <PlayerBadge
-                color="w"
-                name="White"
-                isActive={currentTurn === 'w' && !isOver}
+                color={boardOrientation === 'black' ? 'b' : 'w'}
+                name={
+                  (boardOrientation === 'black'
+                    ? (activeTab === 'review' && reviewPlayers.black) || 'Black'
+                    : (activeTab === 'review' && reviewPlayers.white) || 'White')
+                }
+                isActive={currentTurn === (boardOrientation === 'black' ? 'b' : 'w') && !isOver}
               />
             </div>
           </>
@@ -161,7 +194,11 @@ export default function App() {
         rightColumn={
           <>
             {/* Tab Navigation */}
-            <NavTabs activeTab={activeTab} onTabChange={handleTabChange} />
+            <NavTabs
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              showNextMove={showNextMove}
+            />
 
             {/* Tab Content */}
             <AnimatePresence mode="wait">
@@ -187,7 +224,7 @@ export default function App() {
                 </motion.div>
               )}
 
-              {activeTab === 'terminal' && (
+              {activeTab === 'terminal' && showNextMove && (
                 <motion.div
                   key="terminal"
                   variants={TAB_VARIANTS}
@@ -198,6 +235,8 @@ export default function App() {
                 >
                   <NextMoveTerminal
                     fen={fen}
+                    onLoadFen={handleLoadFen}
+                    onOrientationChange={setBoardOrientation}
                     onHintSquares={handleHintSquares}
                     addToast={addToast}
                   />
@@ -215,6 +254,10 @@ export default function App() {
                 >
                   <ReviewPanel
                     onLoadFen={handleLoadFen}
+                    onLoadBadge={setMoveBadge}
+                    onOrientationChange={setBoardOrientation}
+                    onPlayersChange={setReviewPlayers}
+                    onUsernameChange={setLinkedUsername}
                     addToast={addToast}
                   />
                 </motion.div>

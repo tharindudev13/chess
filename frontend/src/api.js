@@ -1,16 +1,21 @@
 import { API_BASE } from './utils/constants';
 
-async function post(endpoint, body) {
+async function post(endpoint, body, customHeaders = {}) {
   const res = await fetch(`${API_BASE}${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...customHeaders,
+    },
     body: JSON.stringify(body),
   });
 
   const data = await res.json();
 
   if (!res.ok) {
-    throw new Error(data.error || `Request failed (${res.status})`);
+    const error = new Error(data.error || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
   }
 
   return data;
@@ -39,7 +44,17 @@ export function validateHumanMove(fen, move) {
   return post('/validate_human_move', { fen, move });
 }
 
-/** Submit PGN for full game review (single batch) */
-export function reviewGame(pgn) {
-  return post('/review_game', { pgn });
+/** Submit PGN for full game review with user's Gemini API Key in headers & player color */
+export function reviewGame(pgn, playerColor = null, username = null) {
+  const apiKey = localStorage.getItem('gemini_api_key');
+  const headers = apiKey ? { 'X-Gemini-API-Key': apiKey } : {};
+  const body = { pgn };
+  if (playerColor) body.player_color = playerColor;
+  if (username) body.username = username;
+  return post('/review_game', body, headers);
+}
+
+/** Fetch recent games from Chess.com for a given username */
+export function fetchUserGames(username) {
+  return post('/fetch_user_games', { username });
 }

@@ -51,7 +51,7 @@ export default function MatchArena({
       await new Promise((r) => setTimeout(r, 350 + Math.random() * 200));
       const data = await getEngineMove(fen);
       if (data.move) {
-        onMakeMove(data.move.slice(0, 2), data.move.slice(2, 4));
+        onMakeMove(data.move);
       }
     } catch (err) {
       addToast?.('Engine Error: ' + err.message, 'error');

@@ -14,7 +14,7 @@ const WELCOME_LINES = [
   { type: 'divider', text: '─'.repeat(50) },
 ];
 
-export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addToast }) {
+export default function NextMoveTerminal({ fen: externalFen, onLoadFen, onOrientationChange, onHintSquares, addToast }) {
   // ── Terminal state ──
   const [lines, setLines] = useState(WELCOME_LINES);
   const [inputValue, setInputValue] = useState('');
@@ -27,6 +27,11 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
 
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Sync board orientation whenever Next Move terminal is active or color changes
+  useEffect(() => {
+    onOrientationChange?.(playerColor);
+  }, [playerColor, onOrientationChange]);
 
   // Auto-scroll to bottom on new output
   useEffect(() => {
@@ -67,6 +72,9 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
       setSessionFen(data.current_fen);
       setMoveCount((prev) => prev + 1);
 
+      // Automatically update the main board with the new position (both opponent move and counter move applied)
+      onLoadFen?.(data.current_fen);
+
       const evalText = data.evaluation?.type === 'mate'
         ? `Mate in ${Math.abs(data.evaluation.value)}`
         : `${data.evaluation?.value > 0 ? '+' : ''}${(data.evaluation?.value / 100).toFixed(2)} pawns`;
@@ -76,7 +84,7 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
         { type: 'success', text: `> Calculated best counter-move: ${data.san_move}` },
         { type: 'info', text: `> UCI notation: ${data.uci_move}` },
         { type: 'info', text: `> Position evaluation: ${evalText}` },
-        { type: 'highlight', text: `> ✓ ${data.from_square} → ${data.to_square}  [highlighted on board]` },
+        { type: 'highlight', text: `> ✓ ${data.from_square} → ${data.to_square}  [applied to board]` },
         { type: 'info', text: `> Session FEN updated.` },
         { type: 'divider', text: '─'.repeat(50) },
       ]);
@@ -84,12 +92,17 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
       // Highlight recommended squares on the interactive board
       onHintSquares?.({ from: data.from_square, to: data.to_square });
     } catch (err) {
-      addLine('error', `> ERROR: ${err.message}`);
-      addToast?.(`Move failed: ${err.message}`, 'error');
+      let msg = err.message;
+      if (msg.includes('illegal san')) {
+        const oppName = playerColor === 'black' ? 'White' : 'Black';
+        msg = `"${moveStr}" is not a valid move for ${oppName} in this position.`;
+      }
+      addLine('error', `> ERROR: ${msg}`);
+      addToast?.(`Move failed: ${msg}`, 'error');
     } finally {
       setIsProcessing(false);
     }
-  }, [sessionFen, playerColor, addLine, addLines, onHintSquares, addToast]);
+  }, [sessionFen, playerColor, addLine, addLines, onLoadFen, onHintSquares, addToast]);
 
   // ──────────────────────────────────────────────
   // Suggest: Get engine move for current position
@@ -188,6 +201,7 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
       case 'reset':
         setSessionFen(STARTING_FEN);
         setMoveCount(0);
+        onLoadFen?.(STARTING_FEN);
         addLine('command', '$ reset');
         addLine('system', '> Session reset to starting position.');
         onHintSquares?.(null);
@@ -211,7 +225,7 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
         submitOpponentMove(cmd.trim());
         break;
     }
-  }, [runSuggest, runEval, sessionFen, addLine, addLines, onHintSquares, submitOpponentMove]);
+  }, [runSuggest, runEval, sessionFen, addLine, addLines, onLoadFen, onHintSquares, submitOpponentMove]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -225,7 +239,12 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
     setPlayerColor(color);
     setSessionFen(STARTING_FEN);
     setMoveCount(0);
-    addLine('system', `> Player color set to ${color.charAt(0).toUpperCase() + color.slice(1)}. Session reset.`);
+    onOrientationChange?.(color);
+    onLoadFen?.(STARTING_FEN);
+    const oppColor = color === 'black' ? 'White' : 'Black';
+    const oppOpening = color === 'black' ? 'e4, d4' : 'e5, c5';
+    addLine('system', `> Player color set to ${color.charAt(0).toUpperCase() + color.slice(1)}. Session reset and board flipped.`);
+    addLine('info', `> Playing as ${color.toUpperCase()}. Enter ${oppColor}'s move (e.g. ${oppOpening}) to calculate your counter-move.`);
     onHintSquares?.(null);
   };
 
@@ -293,7 +312,11 @@ export default function NextMoveTerminal({ fen: externalFen, onHintSquares, addT
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Enter opponent move or command..."
+            placeholder={
+              playerColor === 'black'
+                ? "Enter White's move (e.g. e4, d4)..."
+                : "Enter Black's move (e.g. e5, c5)..."
+            }
             disabled={isProcessing}
             className="flex-1 bg-transparent outline-none text-text-primary font-mono text-sm placeholder:text-text-dim caret-accent-cyan disabled:opacity-50"
             autoFocus

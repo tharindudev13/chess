@@ -7,10 +7,12 @@ const TABS = [
   { id: 'review', label: 'Game Review', icon: BookOpen },
 ];
 
-export default function NavTabs({ activeTab, onTabChange }) {
+export default function NavTabs({ activeTab, onTabChange, showNextMove = true }) {
+  const visibleTabs = TABS.filter((tab) => tab.id !== 'terminal' || showNextMove);
+
   return (
     <div className="flex items-center gap-1 p-1 rounded-xl bg-bg-elevated/80 border border-border-glass">
-      {TABS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
 
