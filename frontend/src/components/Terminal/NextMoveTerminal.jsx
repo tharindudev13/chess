@@ -7,7 +7,7 @@ import { getEngineSuggestion } from '../../api';
 import { STARTING_FEN } from '../../utils/constants';
 
 const WELCOME_LINES = [
-  { type: 'system', text: 'Chess AI Engine Terminal v2.0' },
+  { type: 'system', text: 'CheckMate.ai Engine Terminal v2.0' },
   { type: 'system', text: 'Powered by Stockfish 16 • Depth 12' },
   { type: 'info', text: '» Select your color, enter opponent moves, and get live engine suggestions.' },
   { type: 'info', text: '» Type "help" for all commands.' },
