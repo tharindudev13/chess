@@ -1,24 +1,37 @@
 import { API_BASE } from './utils/constants';
 
-async function post(endpoint, body, customHeaders = {}) {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...customHeaders,
-    },
-    body: JSON.stringify(body),
-  });
+async function post(endpoint, body, customHeaders = {}, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  const data = await res.json();
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...customHeaders,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
 
-  if (!res.ok) {
-    const error = new Error(data.error || `Request failed (${res.status})`);
-    error.status = res.status;
-    throw error;
+    const data = await res.json();
+
+    if (!res.ok) {
+      const error = new Error(data.error || `Request failed (${res.status})`);
+      error.status = res.status;
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Game review request timed out. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return data;
 }
 
 /**

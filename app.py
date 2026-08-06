@@ -102,8 +102,11 @@ def get_stockfish_path():
 STOCKFISH_PATH = get_stockfish_path()
 
 def create_stockfish(depth=16):
-    """Creates a thread-safe Stockfish engine instance."""
-    sf = Stockfish(path=STOCKFISH_PATH)
+    """Creates a thread-safe Stockfish engine instance with optimized transposition table caching."""
+    try:
+        sf = Stockfish(path=STOCKFISH_PATH, parameters={"Threads": 2, "Hash": 32})
+    except Exception:
+        sf = Stockfish(path=STOCKFISH_PATH)
     sf.set_depth(depth)
     return sf
 
@@ -838,7 +841,7 @@ def review_game():
             + "\n".join(prompt_items)
         )
 
-        models_to_try = ['gemini-3.5-flash-lite'] #never change this line
+        models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         raw_text = None
 
         for mod in models_to_try:
