@@ -20,22 +20,40 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 def get_stockfish_path():
     """Resolves Stockfish path dynamically across Windows local dev and Render/Linux environments."""
-    if os.environ.get("STOCKFISH_PATH"):
-        return os.environ.get("STOCKFISH_PATH")
+    # 1. Environment variable override
+    env_path = os.environ.get("STOCKFISH_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
 
-    # Check downloaded Render binary
-    local_bin = os.path.join(os.path.dirname(__file__), "bin", "stockfish")
+    # 2. Local bin directory (Render build script download)
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        base_dir = os.path.abspath('.')
+
+    local_bin = os.path.join(base_dir, "bin", "stockfish")
     if os.path.exists(local_bin):
         return local_bin
 
-    # Check system PATH
-    if shutil.which("stockfish"):
-        return "stockfish"
+    # 3. Known Linux installation paths on Render / Ubuntu
+    for linux_path in ["/usr/games/stockfish", "/usr/bin/stockfish", "/usr/local/bin/stockfish"]:
+        if os.path.exists(linux_path):
+            return linux_path
 
-    # Fallback to local Windows path
-    default_win = r"C:\stockfish\stockfish-windows-x86-64-avx2.exe"
-    if os.path.exists(default_win):
-        return default_win
+    # 4. System PATH lookup via shutil.which
+    which_path = shutil.which("stockfish")
+    if which_path:
+        return which_path
+
+    # 5. Local Windows installation paths
+    win_paths = [
+        r"C:\stockfish\stockfish-windows-x86-64-avx2.exe",
+        r"C:\stockfish\stockfish.exe",
+        r"C:\Program Files\Stockfish\stockfish.exe",
+    ]
+    for win_path in win_paths:
+        if os.path.exists(win_path):
+            return win_path
 
     return "stockfish"
 
