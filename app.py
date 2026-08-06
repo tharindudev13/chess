@@ -574,10 +574,32 @@ def review_game():
     if target_color not in ['white', 'black']:
         target_color = 'white'  # Default fallback
 
-    board = game.board()
-    reviews = []
     moves_list = list(game.mainline_moves())
+    total_moves = len(moves_list)
 
+    offset_val = data.get('offset')
+    limit_val = data.get('limit')
+
+    if limit_val is not None:
+        try:
+            start_idx = max(0, int(offset_val)) if offset_val is not None else 0
+            chunk_limit = max(1, int(limit_val))
+            end_idx = min(total_moves, start_idx + chunk_limit)
+        except (ValueError, TypeError):
+            start_idx = 0
+            end_idx = total_moves
+    else:
+        start_idx = 0
+        end_idx = total_moves
+
+    board = game.board()
+    # Fast forward board state to start_idx
+    for m in moves_list[:start_idx]:
+        board.push(m)
+
+    chunk_moves = moves_list[start_idx:end_idx]
+
+    reviews = []
     batch_llm_queue = []
 
     white_losses = []
@@ -587,10 +609,10 @@ def review_game():
 
     sf = create_stockfish(depth=16)
 
-    # Initial position pre-eval
+    # Initial position pre-eval for chunk
     best_uci_curr, cp1_curr, cp2_curr = get_top_eval(sf, board.fen(), depth=12)
 
-    for index, move in enumerate(moves_list):
+    for index, move in enumerate(chunk_moves, start=start_idx):
         fen_before = board.fen()
         legal_moves_count = board.legal_moves.count()
         is_forced = (legal_moves_count == 1)
@@ -762,7 +784,7 @@ def review_game():
             black_counts[move_quality] = black_counts.get(move_quality, 0) + 1
 
         batch_llm_queue.append({
-            'id': index,
+            'id': index - start_idx,
             'label': move_label,
             'mover': mover_color_str.upper(),
             'is_user': is_user_move,
@@ -886,10 +908,15 @@ def review_game():
             except Exception as parse_err:
                 print(f"JSON parsing error: {str(parse_err)}")
 
+    has_more = (end_idx < total_moves)
     return jsonify({
         'reviews': reviews,
         'player_color': target_color,
-        'summary': summary_data
+        'summary': summary_data,
+        'total_moves': total_moves,
+        'offset': start_idx,
+        'limit': len(reviews),
+        'has_more': has_more
     })
 
 

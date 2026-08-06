@@ -48,6 +48,7 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
   const [selectedMoveIndex, setSelectedMoveIndex] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [progress, setProgress] = useState({ current: 0, total: 0, percentage: 0 });
 
   // ── Speech / TTS Audio State ──
   const [isMuted, setIsMuted] = useState(false);
@@ -68,97 +69,118 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
       try {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.05;
+        utterance.rate = 1.0;
         utterance.pitch = 1.0;
         window.speechSynthesis.speak(utterance);
       } catch (err) {
-        console.warn('Speech synthesis notice:', err);
+        console.warn('TTS Speech Synthesis error:', err);
       }
     }
   }, [isMuted]);
 
-  // Fetch games when linked user is set or changes
-  const loadUserGames = useCallback(async (user) => {
-    if (!user.trim()) {
-      setRecentGames([]);
-      return;
-    }
+  const handleLinkAccount = async (e) => {
+    e?.preventDefault();
+    const cleanUsername = usernameInput.trim();
+    if (!cleanUsername) return;
+
     setIsFetchingGames(true);
     try {
-      const data = await fetchUserGames(user.trim());
+      const data = await fetchUserGames(cleanUsername);
       setRecentGames(data.games || []);
+      setChesscomUser(cleanUsername);
+      localStorage.setItem('chesscom_username', cleanUsername);
+      onUsernameChange?.(cleanUsername);
+      addToast?.(`Linked Chess.com account: ${cleanUsername}`, 'success');
     } catch (err) {
-      addToast?.(`Chess.com games: ${err.message}`, 'error');
+      addToast?.(err.message || 'Failed to fetch games for user', 'error');
     } finally {
       setIsFetchingGames(false);
     }
-  }, [addToast]);
-
-  useEffect(() => {
-    if (chesscomUser) {
-      loadUserGames(chesscomUser);
-    }
-  }, [chesscomUser, loadUserGames]);
-
-  // Handle Linking Account
-  const handleLinkAccount = (e) => {
-    e.preventDefault();
-    const trimmed = usernameInput.trim();
-    if (!trimmed) return;
-    localStorage.setItem('chesscom_username', trimmed);
-    setChesscomUser(trimmed);
-    onUsernameChange?.(trimmed);
-    loadUserGames(trimmed);
-    addToast?.(`Linked Chess.com user: ${trimmed}`, 'success');
   };
 
   const handleUnlinkAccount = () => {
-    localStorage.removeItem('chesscom_username');
     setChesscomUser('');
     setUsernameInput('');
     setRecentGames([]);
+    localStorage.removeItem('chesscom_username');
     onUsernameChange?.('');
     addToast?.('Unlinked Chess.com account', 'info');
   };
 
-  // Execute Game Review
+  // Execute Game Review in Chunked Batches (10 moves per request)
   const executeReview = useCallback(async (pgnToReview, playerColorPreference = null) => {
     setIsLoading(true);
     setError(null);
     setReviews(null);
     setSummary(null);
     setSelectedMoveIndex(null);
+    setProgress({ current: 0, total: 0, percentage: 0 });
+
+    const CHUNK_SIZE = 10;
+    let offset = 0;
+    let hasMore = true;
+    let accumulatedReviews = [];
+    let latestSummary = null;
+    let orientationSet = false;
 
     try {
-      const data = await reviewGame(pgnToReview.trim(), playerColorPreference, chesscomUser);
-      setReviews(data.reviews);
-      setSummary(data.summary);
-      setViewMode('overview'); // Open Game Overview initially
+      while (hasMore) {
+        const data = await reviewGame(
+          pgnToReview.trim(),
+          playerColorPreference,
+          chesscomUser,
+          offset,
+          CHUNK_SIZE
+        );
 
-      const color = data.player_color || 'white';
-      onOrientationChange?.(color);
-      if (data.summary) {
-        onPlayersChange?.({
-          white: data.summary.white_player || 'White',
-          black: data.summary.black_player || 'Black',
-        });
-      }
+        const newChunk = data.reviews || [];
+        accumulatedReviews = [...accumulatedReviews, ...newChunk];
+        latestSummary = data.summary || latestSummary;
 
-      if (data.reviews?.length > 0) {
-        setSelectedMoveIndex(0);
-        onLoadFen?.(data.reviews[0].fen);
-        onLoadBadge?.({
-          square: data.reviews[0].to_square,
-          quality: data.reviews[0].quality,
-        });
+        const totalMoves = data.total_moves || accumulatedReviews.length;
+        const currentCount = accumulatedReviews.length;
+        const pct = totalMoves > 0 ? Math.min(100, Math.round((currentCount / totalMoves) * 100)) : 100;
+
+        setProgress({ current: currentCount, total: totalMoves, percentage: pct });
+        setReviews([...accumulatedReviews]);
+        setSummary(latestSummary);
+
+        if (!orientationSet) {
+          orientationSet = true;
+          setViewMode('overview'); // Open Game Overview on 1st chunk arrival
+          const color = data.player_color || 'white';
+          onOrientationChange?.(color);
+          if (latestSummary) {
+            onPlayersChange?.({
+              white: latestSummary.white_player || 'White',
+              black: latestSummary.black_player || 'Black',
+            });
+          }
+          if (accumulatedReviews.length > 0) {
+            setSelectedMoveIndex(0);
+            onLoadFen?.(accumulatedReviews[0].fen);
+            onLoadBadge?.({
+              square: accumulatedReviews[0].to_square,
+              quality: accumulatedReviews[0].quality,
+            });
+          }
+        }
+
+        hasMore = data.has_more;
+        offset += newChunk.length;
+        if (newChunk.length === 0) break;
       }
     } catch (err) {
       if (err.status === 401 || err.message?.includes('Gemini API key')) {
         setPendingPgn(pgnToReview);
         setShowKeyModal(true);
       } else {
-        setError(err.message);
-        addToast?.('Review failed: ' + err.message, 'error');
+        if (accumulatedReviews.length === 0) {
+          setError(err.message);
+          addToast?.('Review failed: ' + err.message, 'error');
+        } else {
+          addToast?.('Game review partially completed.', 'warning');
+        }
       }
     } finally {
       setIsLoading(false);
@@ -438,12 +460,26 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
                 exit={{ opacity: 0 }}
                 className="space-y-3"
               >
-                <SkeletonLoader lines={3} />
-                <div className="flex items-center justify-center gap-2 py-4">
-                  <div className="w-4 h-4 border-2 border-accent-green border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm text-text-muted font-heading">Analyzing with Stockfish + Gemini AI...</span>
+                <SkeletonLoader lines={2} />
+                <div className="flex flex-col items-center justify-center gap-3 py-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-accent-green border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-text-muted font-heading">
+                      {progress.total > 0
+                        ? `Analyzing moves ${progress.current} of ${progress.total} (${progress.percentage}%)...`
+                        : 'Analyzing move chunks with Stockfish + AI...'}
+                    </span>
+                  </div>
+                  {progress.total > 0 && (
+                    <div className="w-full bg-bg-surface h-2 rounded-full overflow-hidden border border-border-glass max-w-md">
+                      <div
+                        className="bg-gradient-to-r from-accent-cyan to-accent-green h-full transition-all duration-300"
+                        style={{ width: `${progress.percentage}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-                <SkeletonLoader lines={5} />
+                <SkeletonLoader lines={4} />
               </motion.div>
             ) : (
               <motion.div
@@ -453,6 +489,24 @@ export default function ReviewPanel({ onLoadFen, onLoadBadge, onOrientationChang
                 transition={{ duration: 0.3 }}
                 className="space-y-4"
               >
+                {/* ── Active Background Chunking Progress Banner ── */}
+                {isLoading && progress.total > 0 && (
+                  <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-accent-green/10 border border-accent-green/20">
+                    <div className="flex items-center justify-between text-xs font-heading font-semibold text-accent-green">
+                      <span className="flex items-center gap-1.5">
+                        <div className="w-3 h-3 border-2 border-accent-green border-t-transparent rounded-full animate-spin" />
+                        Processing game chunks...
+                      </span>
+                      <span>{progress.current} / {progress.total} moves ({progress.percentage}%)</span>
+                    </div>
+                    <div className="w-full bg-bg-surface/80 h-1.5 rounded-full overflow-hidden border border-border-glass">
+                      <div
+                        className="bg-accent-green h-full transition-all duration-300"
+                        style={{ width: `${progress.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {/* ── Mode Switcher & TTS Voice Button ── */}
                 <div className="flex items-center justify-between pb-2 border-b border-white/10">
                   <div className="flex gap-1.5 p-1 rounded-xl bg-bg-surface/80 border border-border-glass">

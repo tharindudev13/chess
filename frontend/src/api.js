@@ -57,13 +57,15 @@ export function validateHumanMove(fen, move) {
   return post('/validate_human_move', { fen, move });
 }
 
-/** Submit PGN for full game review with user's Gemini API Key in headers & player color */
-export function reviewGame(pgn, playerColor = null, username = null) {
+/** Submit PGN for game review (supports offset & limit pagination) */
+export function reviewGame(pgn, playerColor = null, username = null, offset = null, limit = null) {
   const apiKey = localStorage.getItem('gemini_api_key');
   const headers = apiKey ? { 'X-Gemini-API-Key': apiKey } : {};
   const body = { pgn };
   if (playerColor) body.player_color = playerColor;
   if (username) body.username = username;
+  if (offset !== null && offset !== undefined) body.offset = offset;
+  if (limit !== null && limit !== undefined) body.limit = limit;
   return post('/review_game', body, headers);
 }
 
